@@ -7,13 +7,19 @@ The Mood Journal API is a comprehensive backend system for tracking daily moods 
 ## 🚀 Features
 
 ### Core Features
-- **Daily Mood Tracking**: Log moods with intensity levels and notes
+
+- **Daily Mood Tracking**: Log moods with intensity levels, notes, and optional public sharing
+- **No Future Entries**: Prevent logging moods for dates in the future
 - **AI Recommendations**: Get personalized suggestions based on mood and profile
+- **AI Support Chat**: Sentiment analysis and supportive guidance (non-medical)
 - **User Profiles**: Store age, nationality, gender, and hobbies for better recommendations
 - **Feedback System**: Rate recommendations to improve future suggestions
 - **Mood Analytics**: Track mood patterns and statistics
+- **Community Feed**: Public mood posts with likes, stars, and owner-only threaded replies
+- **Private Messages**: 1:1 chat between users with polling
 
 ### AI Recommendation Types
+
 - **Movies**: Curated film suggestions for different moods
 - **Cocktails**: Drink recommendations with ingredients
 - **Activities**: Personalized activity suggestions
@@ -24,11 +30,13 @@ The Mood Journal API is a comprehensive backend system for tracking daily moods 
 ### Authentication
 
 #### Register User
+
 ```http
 POST /auth/register
 ```
 
 **Request Body:**
+
 ```json
 {
   "username": "johndoe",
@@ -42,6 +50,7 @@ POST /auth/register
 ```
 
 **Response:**
+
 ```json
 {
   "message": "User created successfully",
@@ -59,11 +68,13 @@ POST /auth/register
 ```
 
 #### Login
+
 ```http
 POST /auth/login
 ```
 
 **Request Body:**
+
 ```json
 {
   "identifier": "johndoe",
@@ -74,46 +85,55 @@ POST /auth/login
 ### Mood Journal
 
 #### Log Mood
+
 ```http
 POST /api/v1/mood/mood
 ```
 
 **Headers:**
+
 ```
 Authorization: Bearer <jwt_token>
 ```
 
 **Request Body:**
+
 ```json
 {
   "mood": "sad",
   "intensity": 7,
-  "note": "Feeling a bit down today"
+  "note": "Feeling a bit down today",
+  "is_public": false
 }
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Mood logged successfully",
   "mood_id": "mood_entry_id",
   "mood": "sad",
   "intensity": 7,
-  "date": "2024-01-15"
+  "date": "2024-01-15",
+  "is_public": false
 }
 ```
 
 #### Get Mood History
+
 ```http
 GET /api/v1/mood/mood?limit=30
 ```
 
 **Headers:**
+
 ```
 Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
+
 ```json
 {
   "moods": [
@@ -132,16 +152,19 @@ Authorization: Bearer <jwt_token>
 ```
 
 #### Get Mood Statistics
+
 ```http
 GET /api/v1/mood/mood/stats?days=7
 ```
 
 **Headers:**
+
 ```
 Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
+
 ```json
 {
   "stats": [
@@ -163,16 +186,19 @@ Authorization: Bearer <jwt_token>
 ### AI Recommendations
 
 #### Get Recommendation
+
 ```http
 POST /api/v1/mood/recommend
 ```
 
 **Headers:**
+
 ```
 Authorization: Bearer <jwt_token>
 ```
 
 **Request Body:**
+
 ```json
 {
   "mood": "sad",
@@ -181,6 +207,7 @@ Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
+
 ```json
 {
   "recommendation": {
@@ -207,16 +234,19 @@ Authorization: Bearer <jwt_token>
 ```
 
 #### Submit Feedback
+
 ```http
 POST /api/v1/mood/feedback
 ```
 
 **Headers:**
+
 ```
 Authorization: Bearer <jwt_token>
 ```
 
 **Request Body:**
+
 ```json
 {
   "recommendation_id": "recommendation_id",
@@ -226,6 +256,7 @@ Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Feedback submitted successfully",
@@ -234,19 +265,43 @@ Authorization: Bearer <jwt_token>
 }
 ```
 
+#### AI Support Chat
+
+```http
+POST /api/v1/mood/chat
+```
+
+**Headers:**
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Request Body:**
+
+```json
+{
+  "entry_text": "I missed the bus twice today and felt frustrated",
+  "mood": "anxious"
+}
+```
+
 ### User Profile
 
 #### Get Profile
+
 ```http
 GET /api/v1/mood/profile
 ```
 
 **Headers:**
+
 ```
 Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
+
 ```json
 {
   "username": "johndoe",
@@ -260,16 +315,19 @@ Authorization: Bearer <jwt_token>
 ```
 
 #### Update Profile
+
 ```http
 PUT /api/v1/mood/profile
 ```
 
 **Headers:**
+
 ```
 Authorization: Bearer <jwt_token>
 ```
 
 **Request Body:**
+
 ```json
 {
   "age": 26,
@@ -278,6 +336,7 @@ Authorization: Bearer <jwt_token>
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Profile updated successfully",
@@ -297,6 +356,7 @@ The AI system recognizes and provides recommendations for these moods:
 ## 🍹 Cocktail Recommendations
 
 Each cocktail recommendation includes:
+
 - **Title**: Name of the cocktail
 - **Description**: Why it's perfect for the mood
 - **Ingredients**: List of ingredients needed
@@ -305,6 +365,7 @@ Each cocktail recommendation includes:
 ## 🎬 Movie Recommendations
 
 Movie recommendations include:
+
 - **Title**: Film name
 - **Description**: Brief synopsis and mood fit
 - **Category**: Genre (comedy, feel-good, action, etc.)
@@ -313,6 +374,7 @@ Movie recommendations include:
 ## 🏃 Activity Recommendations
 
 Activity suggestions include:
+
 - **Title**: Activity name
 - **Description**: What the activity involves
 - **Category**: Type (self-care, social, outdoor, etc.)
@@ -320,11 +382,13 @@ Activity suggestions include:
 ## 🛠️ Setup Instructions
 
 ### Prerequisites
+
 - Python 3.8+
 - MongoDB
 - Redis (optional, for caching)
 
 ### Environment Variables
+
 Create a `.env` file:
 
 ```bash
@@ -335,11 +399,13 @@ MONGO_URI=mongodb://localhost:27017/mood_journal_db
 JWT_SECRET_KEY=your-super-secret-jwt-key-here
 
 # AI Service (Optional)
-OPENROUTER_API_KEY=your-openrouter-api-key-here
-AI_MODEL_NAME=deepseek/deepseek-r1-0528:free
+AI_PROVIDER=openai
+AI_MODEL_NAME=gpt-4o-mini
+API_KEY=your-api-key-here
 ```
 
 ### Installation
+
 ```bash
 cd backend
 pip install -r requirements.txt
@@ -347,6 +413,7 @@ python app.py
 ```
 
 ### Testing
+
 ```bash
 python test_mood_journal.py
 ```
@@ -354,18 +421,25 @@ python test_mood_journal.py
 ## 🔧 Technical Details
 
 ### AI Service Architecture
-- **Primary**: OpenRouter AI API for personalized recommendations
+
+- **Primary**: OpenAI or Gemini (configurable via `AI_PROVIDER`)
 - **Fallback**: Curated recommendation templates
 - **Caching**: In-memory cache to reduce API calls
 - **Rate Limiting**: 30-second cooldown between AI requests
 
 ### Database Collections
+
 - `users`: User profiles and authentication
 - `mood_entries`: Daily mood logs
 - `recommendations`: AI-generated recommendations
 - `user_feedback`: User ratings and feedback
+- `community_posts`: Public mood entries and shared recommendations
+- `post_comments`: Threaded replies (owner-only threads)
+- `chat_conversations`: 1:1 private chats
+- `chat_messages`: Private chat messages
 
 ### Security Features
+
 - JWT token authentication
 - Password hashing with bcrypt
 - Input validation and sanitization
@@ -374,6 +448,7 @@ python test_mood_journal.py
 ## 🎯 Use Cases
 
 ### Example Flow
+
 1. **User Registration**: Create account with profile info
 2. **Daily Mood Log**: Log current mood and intensity
 3. **AI Recommendation**: Get personalized suggestion
@@ -382,10 +457,11 @@ python test_mood_journal.py
 6. **Improved Suggestions**: AI learns from feedback
 
 ### Sample User Journey
+
 ```
-User feels sad → Logs mood (sad, intensity 7) 
-→ AI suggests "The Secret Life of Walter Mitty" 
-→ User watches movie → Provides positive feedback 
+User feels sad → Logs mood (sad, intensity 7)
+→ AI suggests "The Secret Life of Walter Mitty"
+→ User watches movie → Provides positive feedback
 → Future sad moods get similar uplifting recommendations
 ```
 
@@ -400,4 +476,4 @@ User feels sad → Logs mood (sad, intensity 7)
 
 ## 📞 Support
 
-For questions or issues, please refer to the main project documentation or create an issue in the repository. 
+For questions or issues, please refer to the main project documentation or create an issue in the repository.

@@ -22,6 +22,7 @@ class ChatConversation:
             "participants": participants,
             "created_at": datetime.utcnow(),
             "last_message_at": None,
+            "last_message_sender_id": None,
             "participant_usernames": ChatConversation._get_participant_usernames(participants)
         }
         result = g.db.chat_conversations.insert_one(data)
@@ -62,7 +63,12 @@ class ChatMessage:
 
         g.db.chat_conversations.update_one(
             {"_id": ObjectId(conversation_id)},
-            {"$set": {"last_message_at": message_data["created_at"]}}
+            {
+                "$set": {
+                    "last_message_at": message_data["created_at"],
+                    "last_message_sender_id": ObjectId(sender_id)
+                }
+            }
         )
 
         return str(result.inserted_id)

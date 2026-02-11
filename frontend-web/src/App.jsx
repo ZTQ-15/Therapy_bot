@@ -3,6 +3,7 @@ import './App.css';
 
 // Real API functions
 const API_BASE_URL = 'http://127.0.0.1:8080';
+const TIME_ZONE = 'Asia/Singapore';
 
 const api = {
   login: async (identifier, password) => {
@@ -178,6 +179,22 @@ const api = {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error || 'Failed to load messages');
+    }
+
+    return await response.json();
+  },
+
+  getConversations: async (token) => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/community/conversations`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to load conversations');
     }
 
     return await response.json();
@@ -466,10 +483,14 @@ export function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatDraft, setChatDraft] = useState('');
   const [activeConversationPartner, setActiveConversationPartner] = useState(null);
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const [lastSeenConversations, setLastSeenConversations] = useState({});
   const [aiChatMessages, setAiChatMessages] = useState([]);
   const [aiChatDraft, setAiChatDraft] = useState('');
   const [aiChatLoading, setAiChatLoading] = useState(false);
   const [recommendationList, setRecommendationList] = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [isConversationsLoading, setIsConversationsLoading] = useState(false);
 
   // Auth state
   const [authMode, setAuthMode] = useState('login');
@@ -522,6 +543,58 @@ export function App() {
     };
     return colors[mood] || '#FFD700';
   };
+
+  const parseServerTimestamp = (value) => {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    const raw = String(value);
+    const hasTimezone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw);
+    return new Date(hasTimezone ? raw : `${raw}Z`);
+  };
+
+  const formatTime = (value) => {
+    if (!value) return '';
+    const date = parseServerTimestamp(value);
+    if (!date) return '';
+    return new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: TIME_ZONE
+    }).format(date);
+  };
+
+  const formatDate = (value, options) => {
+    if (!value) return '';
+    const date = parseServerTimestamp(value);
+    if (!date) return '';
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: TIME_ZONE,
+      ...options
+    }).format(date);
+  };
+
+  const getConversationPartnerName = (convo) => {
+    if (!convo) return 'User';
+    const participants = convo.participants || [];
+    const otherId = participants.find((id) => String(id) !== String(user?.id));
+    if (otherId && convo.participant_usernames) {
+      return convo.participant_usernames[String(otherId)] || 'User';
+    }
+    return 'User';
+  };
+
+  const isConversationUnread = (convo) => {
+    if (!convo?.last_message_at) return false;
+    if (convo.last_message_sender_id && String(convo.last_message_sender_id) === String(user?.id)) {
+      return false;
+    }
+    const lastSeen = lastSeenConversations[convo._id];
+    if (!lastSeen) return true;
+    return new Date(convo.last_message_at) > new Date(lastSeen);
+  };
+
+  const getLastSeenKey = (userId) => `moodJournalLastSeen:${userId}`;
 
   const capitalizeFirst = (str) => {
     return str.charAt(0).toUpperCase() + str.slice(1);
@@ -617,12 +690,20 @@ export function App() {
     setMoodEntries([]);
     setCurrentRecommendation(null);
     setCommunityPosts([]);
+    setActiveConversationId(null);
+    setChatMessages([]);
+    setChatDraft('');
+    setHasUnreadMessages(false);
+    setLastSeenConversations({});
     
     // Clear localStorage
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem('moodJournalUser');
         console.log('User data cleared from localStorage');
+        if (user?.id) {
+          localStorage.removeItem(getLastSeenKey(user.id));
+        }
       }
     } catch (error) {
       console.error('Error clearing user data from localStorage:', error);
@@ -950,6 +1031,7 @@ export function App() {
       setActiveConversationId(result.conversation_id);
       setChatMessages([]);
       setActiveConversationPartner(otherUserId);
+      setHasUnreadMessages(false);
       setCurrentView('chat');
     } catch (error) {
       console.error('Start conversation error:', error);
@@ -974,6 +1056,10 @@ export function App() {
     };
     setChatMessages(prev => [...prev, optimisticMessage]);
     setChatDraft('');
+    setLastSeenConversations(prev => ({
+      ...prev,
+      [activeConversationId]: new Date().toISOString()
+    }));
 
     try {
       await api.sendConversationMessage(activeConversationId, text, clientId, user.token);
@@ -1171,6 +1257,100 @@ export function App() {
   }, [user, currentView]);
 
   useEffect(() => {
+    if (!user?.id) return;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(getLastSeenKey(user.id));
+        if (raw) {
+          setLastSeenConversations(JSON.parse(raw));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading last seen map:', error);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(
+          getLastSeenKey(user.id),
+          JSON.stringify(lastSeenConversations)
+        );
+      }
+    } catch (error) {
+      console.error('Error saving last seen map:', error);
+    }
+  }, [lastSeenConversations, user?.id]);
+
+  useEffect(() => {
+    if (!user?.token || !user?.id) return;
+
+    let intervalId;
+    const pollConversations = async () => {
+      try {
+        const result = await api.getConversations(user.token);
+        const conversations = result.conversations || [];
+
+        const hasUnread = conversations.some((convo) => {
+          if (!convo.last_message_at) return false;
+          if (convo.last_message_sender_id && String(convo.last_message_sender_id) === String(user.id)) {
+            return false;
+          }
+          const lastSeen = lastSeenConversations[convo._id];
+          if (!lastSeen) return true;
+          return new Date(convo.last_message_at) > new Date(lastSeen);
+        });
+
+        if (hasUnread && currentView !== 'chat') {
+          setHasUnreadMessages(true);
+        }
+      } catch (error) {
+        console.error('Polling conversations failed:', error);
+      }
+    };
+
+    pollConversations();
+    intervalId = setInterval(pollConversations, 5000);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [user?.token, user?.id, lastSeenConversations, currentView]);
+
+  useEffect(() => {
+    if (currentView !== 'chat' || !user?.token) return;
+
+    let isMounted = true;
+    const loadConversations = async () => {
+      setIsConversationsLoading(true);
+      try {
+        const result = await api.getConversations(user.token);
+        if (!isMounted) return;
+        const list = result.conversations || [];
+        setConversations(list);
+
+        if (list.length > 0) {
+          const activeExists = list.some((convo) => convo._id === activeConversationId);
+          if (!activeConversationId || !activeExists) {
+            setActiveConversationId(list[0]._id);
+          }
+        }
+      } catch (error) {
+        console.error('Load conversations failed:', error);
+      } finally {
+        if (isMounted) setIsConversationsLoading(false);
+      }
+    };
+
+    loadConversations();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentView, user?.token, activeConversationId]);
+
+  useEffect(() => {
     if (!activeConversationId || !user?.token) return;
 
     let intervalId;
@@ -1197,6 +1377,19 @@ export function App() {
               if (msg.client_id && existingClientIds.has(msg.client_id)) return false;
               return true;
             });
+            const hasIncoming = next.some(
+              (msg) => String(msg.sender_id) !== String(user?.id)
+            );
+            if (hasIncoming && currentView !== 'chat') {
+              setHasUnreadMessages(true);
+            }
+            if (currentView === 'chat' && next.length > 0) {
+              const lastMessage = next[next.length - 1];
+              setLastSeenConversations(prev => ({
+                ...prev,
+                [activeConversationId]: lastMessage.created_at
+              }));
+            }
             return [...prev, ...next];
           });
         }
@@ -1211,7 +1404,23 @@ export function App() {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [activeConversationId, user?.token, chatMessages]);
+  }, [activeConversationId, user?.token, chatMessages, currentView]);
+
+  useEffect(() => {
+    if (currentView === 'chat') {
+      setHasUnreadMessages(false);
+    }
+  }, [currentView]);
+
+  useEffect(() => {
+    if (currentView !== 'chat' || !activeConversationId) return;
+    if (chatMessages.length === 0) return;
+    const lastMessage = chatMessages[chatMessages.length - 1];
+    setLastSeenConversations(prev => ({
+      ...prev,
+      [activeConversationId]: lastMessage.created_at
+    }));
+  }, [currentView, activeConversationId, chatMessages]);
 
   // Render functions
   const renderAuth = () => (
@@ -1411,7 +1620,7 @@ export function App() {
         }}>
           <div style={{ flex: 1 }}>
             <span className="welcome-text">Welcome back, {user?.username}! 👋</span>
-            <span className="date-text">{new Date().toLocaleDateString()}</span>
+            <span className="date-text">{formatDate(new Date())}</span>
           </div>
           <div
             className="profile-button"
@@ -1448,9 +1657,9 @@ export function App() {
             <span className="calendar-nav-text">‹</span>
           </div>
           <span className="calendar-title">
-            {currentDate.toLocaleDateString('en-US', {
+            {formatDate(currentDate, {
               month: 'long',
-              year: 'numeric',
+              year: 'numeric'
             })}
           </span>
           <div
@@ -1605,7 +1814,12 @@ export function App() {
             className={`nav-item ${currentView === 'chat' ? 'active' : ''}`}
             onClick={() => setCurrentView('chat')}
           >
-            <span className="nav-item-text">Messages</span>
+            <div className="nav-item-label">
+              <span className="nav-item-text">Messages</span>
+              {hasUnreadMessages && currentView !== 'chat' && (
+                <span className="nav-item-dot" title="New messages" />
+              )}
+            </div>
           </div>
           <div
             className={`nav-item ${currentView === 'ai-chat' ? 'active' : ''}`}
@@ -1705,12 +1919,7 @@ export function App() {
       </div>
 
       <div className="mood-input-container">
-        <span className="mood-input-label" style={{ 
-          fontSize: '16px', 
-          fontWeight: '600', 
-          color: 'white', 
-          marginBottom: '12px' 
-        }}>What happened today?</span>
+        <span className="mood-input-label">What happened today?</span>
         <input
           className="mood-input-field"
           placeholder="Describe what made you feel this way..."
@@ -1730,17 +1939,6 @@ export function App() {
           }}
           onClick={(e) => {
             console.log('Description input tapped');
-          }}
-          style={{
-            backgroundColor: 'rgba(255, 255, 255, 0.95)',
-            border: '2px solid rgba(255, 255, 255, 0.3)',
-            borderRadius: '12px',
-            padding: '16px',
-            fontSize: '16px',
-            color: '#333',
-            minHeight: '60px',
-            transition: 'all 0.3s ease',
-            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
           }}
         />
       </div>
@@ -1788,12 +1986,7 @@ export function App() {
       </div>
 
       <div className="mood-input-container">
-        <span className="mood-input-label" style={{ 
-          fontSize: '16px', 
-          fontWeight: '600', 
-          color: 'white', 
-          marginBottom: '12px' 
-        }}>Additional notes (optional)</span>
+        <span className="mood-input-label">Additional notes (optional)</span>
         <input
           className="mood-input-field"
           placeholder="Any additional thoughts..."
@@ -1813,17 +2006,6 @@ export function App() {
           }}
           onClick={(e) => {
             console.log('Notes input tapped');
-          }}
-          style={{
-            backgroundColor: 'rgba(255, 255, 255, 0.95)',
-            border: '2px solid rgba(255, 255, 255, 0.3)',
-            borderRadius: '12px',
-            padding: '16px',
-            fontSize: '16px',
-            color: '#333',
-            minHeight: '60px',
-            transition: 'all 0.3s ease',
-            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)'
           }}
         />
       </div>
@@ -2029,53 +2211,83 @@ export function App() {
         </div>
         <span className="chat-title">Private Messages</span>
       </div>
-
-      {!activeConversationId ? (
-        <div className="chat-empty">
-          <span className="chat-empty-text">
-            Start a chat from the community feed.
-          </span>
+      <div className="chat-layout">
+        <div className="chat-list">
+          <div className="chat-list-title">Conversations</div>
+          {isConversationsLoading && (
+            <div className="chat-list-empty">Loading...</div>
+          )}
+          {!isConversationsLoading && conversations.length === 0 && (
+            <div className="chat-list-empty">Start a chat from the community feed.</div>
+          )}
+          {!isConversationsLoading && conversations.length > 0 && (
+            <div className="chat-list-items">
+              {conversations.map((convo) => (
+                <div
+                  key={convo._id}
+                  className={`chat-list-item ${convo._id === activeConversationId ? 'active' : ''}`}
+                  onClick={() => setActiveConversationId(convo._id)}
+                >
+                  <div className="chat-list-name">{getConversationPartnerName(convo)}</div>
+                  <div className="chat-list-meta">
+                    {convo.last_message_at ? formatTime(convo.last_message_at) : 'No messages yet'}
+                    {isConversationUnread(convo) && (
+                      <span className="chat-list-badge" />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="chat-body">
-          <div className="chat-messages">
-            {chatMessages.map((message) => (
-              <div
-                key={message._id}
-                className={`chat-message ${message.sender_id === user?.id ? 'outgoing' : 'incoming'}`}
-              >
-                {message.sender_id !== user?.id && (
-                  <span className="chat-message-author">
-                    {message.sender_username || 'User'}
-                  </span>
-                )}
-                <span className="chat-message-text">{message.text}</span>
-                <span className="chat-message-time">
-                  {new Date(message.created_at).toLocaleTimeString()}
-                </span>
-              </div>
-            ))}
-          </div>
 
-          <div className="chat-input">
-            <input
-              className="chat-input-field"
-              placeholder="Type a message"
-              value={chatDraft}
-              onChange={(e) => setChatDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSendChatMessage();
-                }
-              }}
-            />
-            <div className="chat-send" onClick={handleSendChatMessage}>
-              <span className="chat-send-text">Send</span>
+        {!activeConversationId ? (
+          <div className="chat-empty">
+            <span className="chat-empty-text">
+              Select a conversation to view messages.
+            </span>
+          </div>
+        ) : (
+          <div className="chat-body">
+            <div className="chat-messages">
+              {chatMessages.map((message) => (
+                <div
+                  key={message._id}
+                  className={`chat-message ${message.sender_id === user?.id ? 'outgoing' : 'incoming'}`}
+                >
+                  {message.sender_id !== user?.id && (
+                    <span className="chat-message-author">
+                      {message.sender_username || 'User'}
+                    </span>
+                  )}
+                  <span className="chat-message-text">{message.text}</span>
+                  <span className="chat-message-time">
+                    {formatTime(message.created_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="chat-input">
+              <input
+                className="chat-input-field"
+                placeholder="Type a message"
+                value={chatDraft}
+                onChange={(e) => setChatDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSendChatMessage();
+                  }
+                }}
+              />
+              <div className="chat-send" onClick={handleSendChatMessage}>
+                <span className="chat-send-text">Send</span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 
@@ -2232,7 +2444,7 @@ export function App() {
             <span className="back-button-text">← Back</span>
           </div>
           <span className="day-detail-title">
-            {selectedDate.toLocaleDateString('en-US', { 
+            {formatDate(selectedDate, { 
               weekday: 'long', 
               year: 'numeric', 
               month: 'long', 
@@ -2273,7 +2485,7 @@ export function App() {
                   <span className="entry-note">{entry.note}</span>
                 )}
                 <span className="entry-time">
-                  {new Date(entry.date).toLocaleTimeString()}
+                  {formatTime(entry.date)}
                 </span>
               </div>
             ))}

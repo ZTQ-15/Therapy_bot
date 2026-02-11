@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime
+from bson import ObjectId
 from auth.models import User
 from models.community_posts import CommunityPost, PostComment
 from models.chat import ChatConversation, ChatMessage
@@ -462,6 +463,10 @@ def list_conversations():
         for convo in conversations:
             convo['_id'] = str(convo['_id'])
             convo['participant_usernames'] = convo.get('participant_usernames', {})
+            if convo.get('last_message_at'):
+                convo['last_message_at'] = convo['last_message_at'].isoformat()
+            if convo.get('last_message_sender_id'):
+                convo['last_message_sender_id'] = str(convo['last_message_sender_id'])
 
         return jsonify({"conversations": conversations}), 200
     except Exception as e:
