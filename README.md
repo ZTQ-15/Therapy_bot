@@ -1,4 +1,4 @@
-# TikTokHacka Project Setup
+# WIT Beyond Binary Project Setup
 
 ## Environment Setup
 
