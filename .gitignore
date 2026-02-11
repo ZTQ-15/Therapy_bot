@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+.vscode/ 
+*.db 
+
+# Environment variables
+.env
+.env.local
+.flaskenv
+
+# Uploaded files
+/uploads/
+
+# IDE specific files
+.idea/ # IntelliJ IDEA
+*.iml # IntelliJ IDEA
+.DS_Store # macOSs
+node_modules/
+frontend-web/node_modules/
+backend/journalenv/
