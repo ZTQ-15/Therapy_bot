@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 
 // Real API functions
@@ -491,6 +491,7 @@ export function App() {
   const [recommendationList, setRecommendationList] = useState([]);
   const [conversations, setConversations] = useState([]);
   const [isConversationsLoading, setIsConversationsLoading] = useState(false);
+  const authModeRef = useRef('login');
 
   // Auth state
   const [authMode, setAuthMode] = useState('login');
@@ -502,6 +503,7 @@ export function App() {
     nationality: '',
     gender: '',
     hobbies: [],
+    hobbiesInput: '',
   });
 
   // Mood logging state
@@ -574,6 +576,33 @@ export function App() {
     }).format(date);
   };
 
+  const parseHobbiesInput = (value) => {
+    if (!value) return [];
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
+  const getMoodEntryKey = (entry) => {
+    const primaryId = entry?._id || entry?.id || entry?.mood_id;
+    if (primaryId) return String(primaryId);
+    const date = entry?.date || entry?.created_at || '';
+    return `${date}-${entry?.mood || ''}-${entry?.intensity || ''}-${entry?.description || ''}-${entry?.note || ''}`;
+  };
+
+  const dedupeMoodEntries = (entries) => {
+    const seen = new Set();
+    const unique = [];
+    entries.forEach((entry) => {
+      const key = getMoodEntryKey(entry);
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push(entry);
+    });
+    return unique;
+  };
+
   const getConversationPartnerName = (convo) => {
     if (!convo) return 'User';
     const participants = convo.participants || [];
@@ -639,6 +668,10 @@ export function App() {
 
   // Event handlers
   const handleAuth = async () => {
+    const mode =
+      authModeRef.current === 'register' || authMode === 'register'
+        ? 'register'
+        : 'login';
     console.log('handleAuth called with authMode:', authMode);
     console.log('authData:', {
       username: authData.username,
@@ -649,13 +682,41 @@ export function App() {
       hobbies: authData.hobbies,
       password: authData.password ? '***' : 'empty'
     });
+
+    if (mode === 'register') {
+      const username = authData.username.trim();
+      const email = authData.email.trim();
+      const password = authData.password;
+      if (!username || !email || !password) {
+        alert('Username, email, and password are required to register.');
+        return;
+      }
+    }
     
     setIsLoading(true);
     try {
-      const result =
-        authMode === 'login'
+      let result =
+        mode === 'login'
           ? await api.login(authData.username, authData.password)
-          : await api.register(authData);
+          : (() => {
+              const { hobbiesInput, ...rest } = authData;
+              return api.register({
+                ...rest,
+                hobbies: parseHobbiesInput(hobbiesInput),
+              });
+            })();
+
+      if (mode === 'register' && !result?.token) {
+        const loginResult = await api.login(authData.username, authData.password);
+        result = {
+          ...result,
+          token: loginResult.token,
+          user: {
+            ...result.user,
+            ...loginResult.user,
+          },
+        };
+      }
 
       console.log('Authentication successful:', result);
       const userData = { ...result.user, token: result.token };
@@ -911,7 +972,7 @@ export function App() {
       console.log('API date:', apiDate);
       console.log('Local date:', new Date());
 
-      setMoodEntries(prev => [...prev, newMoodEntry]);
+      setMoodEntries(prev => dedupeMoodEntries([...prev, newMoodEntry]));
 
       const dateKey = formatDateKey(apiDate);
       console.log('Date key for calendar:', dateKey);
@@ -919,19 +980,14 @@ export function App() {
         const existingEntries = prev[dateKey] || [];
         return {
           ...prev,
-          [dateKey]: [...existingEntries, newMoodEntry],
+          [dateKey]: dedupeMoodEntries([...existingEntries, newMoodEntry]),
         };
       });
 
-      console.log('About to set currentView to recommendations');
+      console.log('About to set currentView to main');
       setCurrentRecommendation(null);
-      setCurrentView('recommendations');
-      console.log('View changed to recommendations');
-      
-      // Automatically get recommendations after logging mood
-      setTimeout(() => {
-        handleGetRecommendation();
-      }, 100);
+      setCurrentView('main');
+      console.log('View changed to main');
     } catch (error) {
       console.error('Mood logging error:', error);
       console.error('Error message:', error.message);
@@ -1162,7 +1218,7 @@ export function App() {
       const result = await api.getMoodHistory(user.token);
       console.log('Mood history result:', result);
       
-      const entries = result.moods || [];
+      const entries = dedupeMoodEntries(result.moods || []);
       console.log('Mood entries loaded:', entries.length);
       
       const entriesByDate = {};
@@ -1351,6 +1407,10 @@ export function App() {
   }, [currentView, user?.token, activeConversationId]);
 
   useEffect(() => {
+    authModeRef.current = authMode;
+  }, [authMode]);
+
+  useEffect(() => {
     if (!activeConversationId || !user?.token) return;
 
     let intervalId;
@@ -1434,13 +1494,19 @@ export function App() {
         <div className="auth-tabs">
           <span
             className={`auth-tab ${authMode === 'login' ? 'active' : ''}`}
-            onClick={() => setAuthMode('login')}
+            onClick={() => {
+              authModeRef.current = 'login';
+              setAuthMode('login');
+            }}
           >
             Login
           </span>
           <span
             className={`auth-tab ${authMode === 'register' ? 'active' : ''}`}
-            onClick={() => setAuthMode('register')}
+            onClick={() => {
+              authModeRef.current = 'register';
+              setAuthMode('register');
+            }}
           >
             Register
           </span>
@@ -1555,15 +1621,11 @@ export function App() {
               <input
                 className="auth-input-field"
                 placeholder="e.g., reading, music, sports"
-                value={authData.hobbies.join(', ')}
+                value={authData.hobbiesInput}
                 type="text"
                 
                 onChange={(e) => {
-                  const hobbiesArray = e.target.value
-                    .split(',')
-                    .map(h => h.trim())
-                    .filter(h => h);
-                  setAuthData(prev => ({ ...prev, hobbies: hobbiesArray }));
+                  setAuthData(prev => ({ ...prev, hobbiesInput: e.target.value }));
                 }}
                 onFocus={(e) => {
                   console.log('Hobbies input focused');
@@ -2432,7 +2494,7 @@ export function App() {
     if (!selectedDate) return renderMain();
     
     const dateKey = formatDateKey(selectedDate);
-    const entries = calendarMoodEntries[dateKey] || [];
+    const entries = dedupeMoodEntries(calendarMoodEntries[dateKey] || []);
     
     return (
       <div className="day-detail-container">
@@ -2467,8 +2529,8 @@ export function App() {
           </div>
         ) : (
           <div className="day-entries">
-            {entries.map((entry, index) => (
-              <div key={index} className="day-entry-card">
+            {entries.map((entry) => (
+              <div key={getMoodEntryKey(entry)} className="day-entry-card">
                 <div className="entry-header">
                   <span className="entry-mood-emoji">{getMoodEmoji(entry.mood)}</span>
                   <span className="entry-mood-name">{capitalizeFirst(entry.mood)}</span>
