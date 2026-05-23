@@ -1,4 +1,4 @@
-# WIT Beyond Binary Project Setup
+# Project Setup
 
 ## Environment Setup
 
